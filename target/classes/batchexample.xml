@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:tracking="http://www.mulesoft.org/schema/mule/ee/tracking" xmlns:data-mapper="http://www.mulesoft.org/schema/mule/ee/data-mapper" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:json="http://www.mulesoft.org/schema/mule/json" xmlns:batch="http://www.mulesoft.org/schema/mule/batch" xmlns:sfdc="http://www.mulesoft.org/schema/mule/sfdc" xmlns:db="http://www.mulesoft.org/schema/mule/db" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:spring="http://www.springframework.org/schema/beans" version="EE-3.5.0"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-current.xsd
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/batch http://www.mulesoft.org/schema/mule/batch/current/mule-batch.xsd
+http://www.mulesoft.org/schema/mule/sfdc http://www.mulesoft.org/schema/mule/sfdc/current/mule-sfdc.xsd
+http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+http://www.mulesoft.org/schema/mule/ee/data-mapper http://www.mulesoft.org/schema/mule/ee/data-mapper/current/mule-data-mapper.xsd
+http://www.mulesoft.org/schema/mule/json http://www.mulesoft.org/schema/mule/json/current/mule-json.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/ee/tracking http://www.mulesoft.org/schema/mule/ee/tracking/current/mule-tracking-ee.xsd">
+    <sfdc:config name="Salesforce" username="traininguser@mulesoft.com" password="322learnmule" securityToken="nSiII3MCdb7UWFERS5m0zE96" doc:name="Salesforce"/>
+    <db:mysql-config name="MySQL_Configuration" host="ec2-54-81-22-148.compute-1.amazonaws.com" port="3306" user="MuleReader" password="learnmule" database="MuleTrainingCHE" doc:name="MySQL Configuration"/>
+    <data-mapper:config name="list_map__to_list_account_" transformationGraphPath="list_map__to_list_account_.grf" doc:name="list_map__to_list_account_"/>
+    <data-mapper:config name="list_map__to_account" transformationGraphPath="list_map__to_account.grf" doc:name="list_map__to_account"/>
+    <batch:job name="batchBatch1">
+        <batch:threading-profile poolExhaustedAction="WAIT"/>
+        <batch:input>
+            <poll doc:name="Poll">
+                <fixed-frequency-scheduler frequency="90" timeUnit="SECONDS"/>
+                <watermark variable="lastID" default-expression="0" selector="LAST" selector-expression="#[payload.accountID]"/>
+                <db:select config-ref="MySQL_Configuration" doc:name="Database">
+                    <db:parameterized-query><![CDATA[SELECT *
+FROM Account
+WHERE accountID > #[flowVars.'lastID']]]></db:parameterized-query>
+                </db:select>
+            </poll>
+            <data-mapper:transform config-ref="list_map__to_account" doc:name="List&lt;Map&gt; To Account"/>
+        </batch:input>
+        <batch:process-records>
+            <batch:step name="Batch_Step1">
+                <enricher source="#[payload.size() &lt;= 0]" target="#[recordVars['new']]" doc:name="Message Enricher">
+                    <sfdc:query config-ref="Salesforce" query="dsql:SELECT Name FROM Account WHERE Name = '#[payload.Name]'" doc:name="Salesforce"/>
+                </enricher>
+            </batch:step>
+            <batch:step name="Batch_Step2">
+                <logger message="#" level="INFO" doc:name="Logger"/>
+            </batch:step>
+            <batch:step name="Batch_Step" accept-expression="#[recordVars.new]">
+                <logger message="#['\n\n' + message.payload + '\n\n']" level="INFO" doc:name="Logger"/>
+                <batch:commit size="100" doc:name="Batch Commit">
+                    <sfdc:create config-ref="Salesforce" type="Account" doc:name="Salesforce">
+                        <sfdc:objects ref="#[payload]"/>
+                    </sfdc:create>
+                </batch:commit>
+            </batch:step>
+        </batch:process-records>
+        <batch:on-complete>
+            <logger level="INFO" doc:name="Logger"/>
+        </batch:on-complete>
+    </batch:job>
+    <flow name="batchFlow1" doc:name="batchFlow1">
+        <http:inbound-endpoint exchange-pattern="request-response" host="localhost" port="8081" doc:name="HTTP"/>
+        <sfdc:query config-ref="Salesforce" query="dsql:SELECT BillingCity,BillingCountry,BillingLatitude,BillingLongitude,BillingPostalCode,BillingState,BillingStreet,Name FROM Account WHERE Name = #[message.inboundProperties['postal']]" doc:name="Salesforce"/>
+        <json:object-to-json-transformer doc:name="Object to JSON"/>
+    </flow>
+</mule>
